@@ -155,13 +155,16 @@ async def demo_upload_invoice(attachment: UploadFile = File(...)):
         invoice_id = inv.id
         
         # Wait for OCR to complete (with timeout)
-        max_wait = 30  # seconds
+        max_wait = 60  # seconds (increased for PDF processing)
         wait_interval = 0.5
         waited = 0
         
         while waited < max_wait:
             db.refresh(inv)
             if inv.status == InvoiceStatus.OCR_DONE:
+                break
+            elif inv.status == InvoiceStatus.FAILED_RETRYABLE or inv.status == InvoiceStatus.FAILED_FINAL:
+                # Extraction failed - return error immediately
                 break
             await asyncio.sleep(wait_interval)
             waited += wait_interval
@@ -184,15 +187,28 @@ async def demo_upload_invoice(attachment: UploadFile = File(...)):
                 "extracted_fields": inv.extracted_fields
             }
         elif inv.status == InvoiceStatus.EXTRACTION_FAILED:
+            error_msg = inv.last_error or "Field extraction failed"
+            # Provide user-friendly error message
+            if "PDF text extraction failed" in error_msg or "image-based" in error_msg.lower():
+                error_msg = "PDF appears to be image-based (scanned). This app requires text-based PDFs. Please use a PDF with selectable text."
             return {
                 "status": "extraction_failed",
-                "error": inv.last_error or "Field extraction failed",
+                "error": error_msg,
                 "extracted_fields": inv.extracted_fields or {}
+            }
+        elif inv.status in [InvoiceStatus.FAILED_RETRYABLE, InvoiceStatus.FAILED_FINAL]:
+            error_msg = inv.last_error or "Processing failed"
+            if "PDF text extraction failed" in error_msg or "image-based" in error_msg.lower():
+                error_msg = "PDF appears to be image-based (scanned). This app requires text-based PDFs. Please use a PDF with selectable text."
+            return {
+                "status": "error",
+                "error": error_msg,
+                "extracted_fields": {}
             }
         else:
             return {
                 "status": "timeout",
-                "error": "Processing timed out. Please try again.",
+                "error": "Processing timed out. The PDF may be too large or complex. Please try again with a simpler PDF.",
                 "extracted_fields": {}
             }
             

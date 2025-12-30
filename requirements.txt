@@ -5,4 +5,5 @@ psycopg[binary]
 pydantic-settings
 python-multipart
 PyPDF2
+pdfplumber
 
