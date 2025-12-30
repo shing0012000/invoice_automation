@@ -253,20 +253,31 @@ def worker_loop():
                     # Mark pending (prevents double-processing if multiple workers)
                     mark_ocr_pending(db, ocr_job)
 
-                    # TODO: STEP 3 OCR will happen here.
-                    # For now, simulate OCR with sample text:
-                    sample_ocr_text = (
-                        "INVOICE\n"
-                        "Invoice No: INV-2024-001\n"
-                        "Date: 2024-12-15\n"
-                        "From: Acme Corporation\n\n"
-                        "Subtotal: $1,000.00\n"
-                        "Tax: $100.00\n"
-                        "Total: $1,100.00\n"
-                        "Currency: USD"
-                    )
-                    time.sleep(0.2)
-                    mark_ocr_done(db, ocr_job, ocr_text=sample_ocr_text)
+                    # Extract text from PDF file
+                    from app.pdf_extraction import extract_text_from_pdf
+                    
+                    ocr_text = None
+                    if ocr_job.storage_path and os.path.exists(ocr_job.storage_path):
+                        logger.info(f"Extracting text from PDF: {ocr_job.storage_path}")
+                        ocr_text = extract_text_from_pdf(ocr_job.storage_path)
+                        
+                        if not ocr_text:
+                            # If extraction fails, mark as retryable error
+                            error_msg = "PDF text extraction failed - file may be image-based or corrupted"
+                            logger.warning(f"Invoice {ocr_job.id}: {error_msg}")
+                            mark_retry(db, ocr_job, error=error_msg)
+                            db.close()
+                            continue
+                    else:
+                        error_msg = f"PDF file not found: {ocr_job.storage_path}"
+                        logger.error(f"Invoice {ocr_job.id}: {error_msg}")
+                        mark_retry(db, ocr_job, error=error_msg)
+                        db.close()
+                        continue
+                    
+                    # Mark OCR as done with extracted text
+                    mark_ocr_done(db, ocr_job, ocr_text=ocr_text)
+                    logger.info(f"Invoice {ocr_job.id}: Text extraction complete ({len(ocr_text)} characters)")
                 except Exception as e:
                     # if we have a job object in scope, schedule retry
                     mark_retry(db, ocr_job, error=str(e))
