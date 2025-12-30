@@ -30,6 +30,28 @@ def extract_text_from_pdf(file_path: str) -> Optional[str]:
         - PDF is corrupted
         - Extraction fails for any reason
     """
+    import os
+    
+    # Validate file exists and is readable
+    if not os.path.exists(file_path):
+        logger.error(f"PDF file does not exist: {file_path}")
+        return None
+    
+    # Verify it's actually a PDF file
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(4)
+            if header != b'%PDF':
+                logger.error(f"File does not appear to be a PDF (header: {header})")
+                return None
+            # Reset file pointer
+            f.seek(0)
+    except Exception as e:
+        logger.error(f"Could not read PDF file: {e}")
+        return None
+    
+    file_size = os.path.getsize(file_path)
+    logger.info(f"Processing PDF: {file_path} ({file_size} bytes)")
     # Try pdfplumber first (better text extraction)
     pdfplumber_available = False
     try:

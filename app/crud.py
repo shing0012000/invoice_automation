@@ -58,8 +58,22 @@ def create_invoice_from_attachment(
     db.flush()  # get inv.id
 
     # Write file to disk
-    with open(storage_path, "wb") as f:
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(storage_path) if os.path.dirname(storage_path) else '.', exist_ok=True)
+    
+    # Use absolute path for storage to avoid issues on Render
+    abs_storage_path = os.path.abspath(storage_path)
+    
+    with open(abs_storage_path, "wb") as f:
         f.write(file_bytes)
+    
+    # Verify file was written correctly
+    written_size = os.path.getsize(abs_storage_path) if os.path.exists(abs_storage_path) else 0
+    if written_size != len(file_bytes):
+        raise IOError(f"File size mismatch: wrote {written_size} bytes, expected {len(file_bytes)} bytes")
+    
+    # Store absolute path in database for consistency across environments
+    inv.storage_path = abs_storage_path
 
     inv.updated_at = datetime.utcnow()
     db.commit()

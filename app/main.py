@@ -273,20 +273,54 @@ def worker_loop():
                     from app.pdf_extraction import extract_text_from_pdf
                     
                     ocr_text = None
-                    if ocr_job.storage_path and os.path.exists(ocr_job.storage_path):
-                        logger.info(f"Extracting text from PDF: {ocr_job.storage_path}")
-                        ocr_text = extract_text_from_pdf(ocr_job.storage_path)
+                    # Resolve path (handle both relative and absolute)
+                    pdf_path = ocr_job.storage_path
+                    if pdf_path:
+                        # Try absolute path first, then relative
+                        if not os.path.isabs(pdf_path):
+                            pdf_path = os.path.abspath(pdf_path)
+                        
+                        logger.info(f"Extracting text from PDF: {pdf_path}")
+                        logger.info(f"  - Path exists: {os.path.exists(pdf_path)}")
+                        if os.path.exists(pdf_path):
+                            file_size = os.path.getsize(pdf_path)
+                            logger.info(f"  - File size: {file_size} bytes")
+                            # Verify it's actually a PDF
+                            try:
+                                with open(pdf_path, 'rb') as f:
+                                    header = f.read(4)
+                                    if header == b'%PDF':
+                                        logger.info(f"  - PDF header verified: {header}")
+                                    else:
+                                        logger.warning(f"  - ⚠ File doesn't start with PDF header: {header}")
+                            except Exception as e:
+                                logger.warning(f"  - Could not verify PDF header: {e}")
+                        
+                        if os.path.exists(pdf_path):
+                            ocr_text = extract_text_from_pdf(pdf_path)
+                        else:
+                            logger.error(f"  - PDF file not found at: {pdf_path}")
+                            logger.error(f"  - Current working directory: {os.getcwd()}")
+                            logger.error(f"  - Storage dir: {os.path.abspath(settings.storage_dir)}")
                         
                         if not ocr_text:
                             # If extraction fails, mark as retryable error
                             error_msg = "PDF text extraction failed - file may be image-based or corrupted"
                             logger.warning(f"Invoice {ocr_job.id}: {error_msg}")
+                            # Log additional diagnostics
+                            logger.warning(f"  - File path: {pdf_path}")
+                            logger.warning(f"  - File exists: {os.path.exists(pdf_path) if pdf_path else False}")
+                            if pdf_path and os.path.exists(pdf_path):
+                                logger.warning(f"  - File size: {os.path.getsize(pdf_path)} bytes")
                             mark_retry(db, ocr_job, error=error_msg)
                             db.close()
                             continue
                     else:
                         error_msg = f"PDF file not found: {ocr_job.storage_path}"
                         logger.error(f"Invoice {ocr_job.id}: {error_msg}")
+                        logger.error(f"  - Current working directory: {os.getcwd()}")
+                        logger.error(f"  - Storage dir: {os.path.abspath(settings.storage_dir)}")
+                        logger.error(f"  - Tried path: {pdf_path if 'pdf_path' in locals() else 'N/A'}")
                         mark_retry(db, ocr_job, error=error_msg)
                         db.close()
                         continue
