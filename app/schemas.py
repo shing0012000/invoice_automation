@@ -1,11 +1,10 @@
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
-import uuid
 from app.models import InvoiceStatus
 
 class InvoiceOut(BaseModel):
-    id: uuid.UUID
+    id: str  # UUID stored as string for portability
     email_message_id: str
     sender: str
     subject: str

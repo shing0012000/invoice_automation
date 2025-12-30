@@ -1,8 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Integer, Text, Enum
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import String, DateTime, Integer, Text, Enum, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
@@ -18,7 +17,8 @@ class InvoiceStatus(str, enum.Enum):
 class Invoice(Base):
     __tablename__ = "invoices"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Use String for UUID to ensure portability across PostgreSQL and SQLite
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     email_message_id: Mapped[str] = mapped_column(String(255), index=True)
     sender: Mapped[str] = mapped_column(String(255), default="")
@@ -38,8 +38,9 @@ class Invoice(Base):
     last_error: Mapped[str] = mapped_column(Text, default="")
 
     # OCR and extraction fields
+    # Use JSON instead of JSONB for portability (works on both PostgreSQL and SQLite)
     ocr_text: Mapped[str] = mapped_column(Text, nullable=True)
-    extracted_fields: Mapped[dict] = mapped_column(JSONB, nullable=True)
+    extracted_fields: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -33,8 +33,8 @@ def create_invoice_from_attachment(
     if existing:
         return existing
 
-    # Generate UUID first so we can construct storage_path before creating the Invoice
-    invoice_id = uuid.uuid4()
+    # Generate UUID as string for portability
+    invoice_id = str(uuid.uuid4())
     storage_path = os.path.join(settings.storage_dir, f"{invoice_id}")
     # keep extension if present
     if "." in filename:

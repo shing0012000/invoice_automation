@@ -6,6 +6,7 @@ import time
 import asyncio
 import uuid
 import os
+import logging
 
 from app.db import Base, engine, get_db, SessionLocal
 from app.schemas import InvoiceOut
@@ -17,14 +18,77 @@ from app.worker import (
     pick_next_extraction_job, mark_extracted, mark_extraction_failed
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Configure FastAPI based on demo mode
 if settings.demo_mode:
     app = FastAPI(title="Invoice Automation Demo", docs_url=None, redoc_url=None)
 else:
     app = FastAPI(title="Invoice Automation MVP")
 
-# Create tables (MVP). Later replace with Alembic migrations.
-Base.metadata.create_all(bind=engine)
+# Startup self-checks and schema creation
+@app.on_event("startup")
+async def startup_checks():
+    """Perform startup validation and logging."""
+    logger.info("=" * 60)
+    logger.info("Invoice Automation - Startup Checks")
+    logger.info("=" * 60)
+    
+    # Log database configuration
+    db_dialect = engine.dialect.name
+    logger.info(f"Database dialect: {db_dialect}")
+    logger.info(f"Database URL: {settings.database_url.split('@')[-1] if '@' in settings.database_url else settings.database_url}")
+    
+    # Log demo mode status
+    logger.info(f"Demo mode: {settings.demo_mode}")
+    if settings.demo_mode:
+        logger.info("  - Swagger UI: DISABLED")
+        logger.info("  - Internal endpoints: HIDDEN")
+    else:
+        logger.info("  - Swagger UI: ENABLED at /docs")
+        logger.info("  - Internal endpoints: AVAILABLE")
+    
+    # Log storage configuration
+    storage_abs = os.path.abspath(settings.storage_dir)
+    logger.info(f"Storage directory: {storage_abs}")
+    try:
+        os.makedirs(settings.storage_dir, exist_ok=True)
+        logger.info(f"  - Directory exists/created: OK")
+    except Exception as e:
+        logger.error(f"  - Directory creation failed: {e}")
+        raise
+    
+    # Validate database connection and create schema
+    try:
+        logger.info("Creating database schema...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("  - Schema creation: SUCCESS")
+        
+        # Test connection (dialect-aware)
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1"))
+            result.fetchone()
+        logger.info("  - Database connection: OK")
+        
+    except Exception as e:
+        logger.error(f"  - Schema creation/connection failed: {e}")
+        raise
+    
+    logger.info("=" * 60)
+    logger.info("Startup checks complete. Application ready.")
+    logger.info("=" * 60)
+
+# Create tables on module load (fallback if startup event doesn't fire)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    logger.warning(f"Schema creation on module load failed (may be expected): {e}")
 
 # Demo UI - serve static HTML at root
 @app.get("/", response_class=HTMLResponse)
@@ -150,12 +214,14 @@ if not settings.demo_mode:
 
     @app.get("/invoices/{invoice_id}", response_model=InvoiceOut)
     def get_invoice(invoice_id: str, db: Session = Depends(get_db)):
+        # Validate UUID format (but store as string)
         try:
-            invoice_uuid = uuid.UUID(invoice_id)
+            uuid.UUID(invoice_id)  # Validate format
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid invoice ID format")
         
-        inv = db.get(Invoice, invoice_uuid)
+        # Query using string ID (portable across databases)
+        inv = db.get(Invoice, invoice_id)
         if inv is None:
             raise HTTPException(status_code=404, detail="Invoice not found")
         return inv
@@ -225,6 +291,9 @@ def worker_loop():
 
 @app.on_event("startup")
 def start_worker():
+    """Start background worker thread."""
+    logger.info("Starting background worker thread...")
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
+    logger.info("Background worker started.")
 
