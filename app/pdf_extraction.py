@@ -92,26 +92,45 @@ def extract_text_from_pdf(file_path: str) -> Optional[str]:
                             except Exception as e:
                                 logger.debug(f"Table extraction failed for page {page_num + 1}: {e}")
                         
-                        # Diagnostic: Check if page has chars attribute
+                        # Diagnostic: Check if page has chars attribute - this is the KEY fallback
                         if not page_text or not page_text.strip():
                             try:
                                 chars = page.chars
                                 if chars and len(chars) > 0:
-                                    logger.warning(f"Page {page_num + 1} has {len(chars)} character objects but extract_text() returned empty")
-                                    # Try to reconstruct text from chars
-                                    if len(chars) > 0:
-                                        # Group chars by approximate y position (lines)
-                                        from collections import defaultdict
-                                        lines = defaultdict(list)
-                                        for char in chars[:100]:  # Limit to first 100 chars for performance
-                                            y = round(char.get('top', 0) / 10) * 10  # Round to nearest 10
-                                            lines[y].append(char.get('text', ''))
-                                        reconstructed = '\n'.join(''.join(chars) for y in sorted(lines.keys()) for chars in [lines[y]])
-                                        if reconstructed.strip():
-                                            page_text = reconstructed
-                                            logger.info(f"Reconstructed text from character objects on page {page_num + 1}")
+                                    logger.info(f"Page {page_num + 1} has {len(chars)} character objects - reconstructing text")
+                                    # Reconstruct text from ALL character objects
+                                    # Group chars by approximate y position (lines) to preserve layout
+                                    from collections import defaultdict
+                                    lines = defaultdict(list)
+                                    
+                                    # Process all characters, not just first 100
+                                    for char in chars:
+                                        char_text = char.get('text', '')
+                                        if char_text:  # Only add non-empty characters
+                                            # Use top position to group into lines
+                                            # Round to nearest 5 pixels to group similar y positions
+                                            y = round(char.get('top', 0) / 5) * 5
+                                            x = char.get('x0', 0)  # Store x position for sorting
+                                            lines[y].append((x, char_text))
+                                    
+                                    # Sort by y position (top to bottom), then by x position (left to right)
+                                    reconstructed_lines = []
+                                    for y in sorted(lines.keys(), reverse=True):  # Reverse for top-to-bottom
+                                        # Sort characters in line by x position
+                                        line_chars = sorted(lines[y], key=lambda c: c[0])
+                                        line_text = ''.join(text for _, text in line_chars)
+                                        if line_text.strip():
+                                            reconstructed_lines.append(line_text)
+                                    
+                                    if reconstructed_lines:
+                                        page_text = '\n'.join(reconstructed_lines)
+                                        logger.info(f"Successfully reconstructed {len(reconstructed_lines)} lines ({len(page_text)} chars) from {len(chars)} character objects on page {page_num + 1}")
+                                    else:
+                                        logger.warning(f"Could not reconstruct text from {len(chars)} character objects on page {page_num + 1}")
                             except Exception as e:
-                                logger.debug(f"Character extraction failed for page {page_num + 1}: {e}")
+                                logger.warning(f"Character extraction failed for page {page_num + 1}: {e}")
+                                import traceback
+                                logger.debug(traceback.format_exc())
                         
                         if page_text and page_text.strip():
                             text_parts.append(page_text.strip())
