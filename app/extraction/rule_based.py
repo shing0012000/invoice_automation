@@ -150,15 +150,27 @@ def _extract_vendor_name(text: str, text_lower: str) -> Optional[str]:
                 return name.title()
     
     # Fallback: look for company-like text in first few lines (but be more careful)
-    lines = header.split('\n')[:8]
+    lines = header.split('\n')[:10]
+    skip_patterns = [
+        r'click\s+to\s+edit',
+        r'invoice',
+        r'^[|]',  # Table separators
+        r'^\s*$',  # Empty lines
+        r'^\d+',  # Lines starting with numbers
+        r'\d{4}[-/]\d',  # Dates
+        r'(billed\s+to|from|date|invoice|total|subtotal|tax|amount)',  # Common keywords
+    ]
+    
     for i, line in enumerate(lines):
         line = line.strip()
-        # Skip lines that look like addresses, dates, numbers, or common invoice keywords
-        if (len(line) > 5 and len(line) < 50 and 
-            not re.match(r'^\d+', line) and 
-            not re.search(r'\d{4}[-/]\d', line) and
-            not re.search(r'(invoice|date|total|subtotal|tax|amount)', line, re.IGNORECASE) and
-            re.match(r'^[A-Z]', line) and
+        # Skip if matches any skip pattern
+        if any(re.search(pattern, line, re.IGNORECASE) for pattern in skip_patterns):
+            continue
+        
+        # Look for company-like text (all caps or title case, reasonable length)
+        if (len(line) > 3 and len(line) < 50 and 
+            (line.isupper() or (line[0].isupper() and not line.islower())) and
+            not re.search(r'[0-9]{4,}', line) and  # No long number sequences
             i > 0):  # Skip first line (often "INVOICE")
             return line
     
@@ -169,10 +181,25 @@ def _extract_subtotal(text: str, text_lower: str) -> Optional[str]:
     """Extract subtotal amount."""
     patterns = [
         r'subtotal\s*:?\s*\$?\s*([\d,]+\.?\d*)',
-        r'sub\s+total\s*:?\s*\$?\s*([\d,]+\.?\d*)',
+        r'sub\s+total\s*:?\s*\$?\s*\$?\s*([\d,]+\.?\d*)',
         r'total\s+before\s+tax\s*:?\s*\$?\s*([\d,]+\.?\d*)',
     ]
     
+    # Also handle table format: "| Subtotal | | $1,798.39 |"
+    table_patterns = [
+        r'[|]\s*subtotal\s*[|][^|]*[|]\s*\$?\s*([\d,]+\.?\d*)\s*[|]',
+        r'[|]\s*sub\s+total\s*[|][^|]*[|]\s*\$?\s*([\d,]+\.?\d*)\s*[|]',
+    ]
+    
+    # Try table patterns first (more specific)
+    for pattern in table_patterns:
+        match = re.search(pattern, text_lower, re.IGNORECASE)
+        if match:
+            value = _normalize_amount(match.group(1))
+            if value:
+                return value
+    
+    # Then try regular patterns
     for pattern in patterns:
         match = re.search(pattern, text_lower)
         if match:
@@ -191,6 +218,21 @@ def _extract_tax(text: str, text_lower: str) -> Optional[str]:
         r'sales\s+tax\s*:?\s*\$?\s*([\d,]+\.?\d*)',
     ]
     
+    # Also handle table format: "| Tax | | +$80.93 |" or "| Tax | | $80.93 |"
+    table_patterns = [
+        r'[|]\s*tax\s*[|][^|]*[|]\s*\+?\$?\s*([\d,]+\.?\d*)\s*[|]',
+        r'[|]\s*tax\s+amount\s*[|][^|]*[|]\s*\$?\s*([\d,]+\.?\d*)\s*[|]',
+    ]
+    
+    # Try table patterns first (more specific)
+    for pattern in table_patterns:
+        match = re.search(pattern, text_lower, re.IGNORECASE)
+        if match:
+            value = _normalize_amount(match.group(1))
+            if value:
+                return value
+    
+    # Then try regular patterns
     for pattern in patterns:
         match = re.search(pattern, text_lower)
         if match:
