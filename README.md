@@ -115,8 +115,14 @@ If you want to use PostgreSQL locally:
    DEMO_MODE=true
    PORT=8000
    ```
+   Note: `PORT` is automatically set by Render - you don't need to set it manually.
 
-4. **Deploy**
+4. **Configure Health Check** (Important!)
+   - In Render dashboard, go to your service settings
+   - Under "Health Check Path", set: `/health`
+   - This prevents deployment timeouts
+
+5. **Deploy**
    - Render will automatically detect the `Procfile`
    - Build and deploy will start automatically
    - Service will be available at `https://your-app.onrender.com`
@@ -139,6 +145,12 @@ If you want to use PostgreSQL locally:
 | `PORT` | Server port (Render sets this automatically) | `8000` |
 
 ## API Endpoints
+
+### Health Check (Always Available)
+
+- `GET /health` - Health check endpoint for cloud platforms
+  - Returns: `{"status": "healthy", "service": "invoice-automation", "database": "connected", "demo_mode": true}`
+  - Used by Render, Fly.io, Railway for deployment verification
 
 ### Demo Mode (when `DEMO_MODE=true`)
 
@@ -193,6 +205,38 @@ invoice_automation/
 ## License
 
 This is a demo project. Use at your own risk.
+
+## Troubleshooting
+
+### Render Deployment Timeout
+
+If your deployment times out on Render:
+
+1. **Check Health Check Path**: Ensure `/health` is set in Render dashboard
+   - Go to your service → Settings → Health Check Path
+   - Set to: `/health`
+
+2. **Check Logs**: Look for startup errors in Render logs
+   - Common issues: Database connection failures, missing environment variables
+
+3. **Verify Environment Variables**: Ensure all required vars are set
+   - `DATABASE_URL` must be valid
+   - `DEMO_MODE` should be `true` for public demo
+
+4. **Check Port**: Render sets `PORT` automatically - don't override it
+
+### Database Connection Issues
+
+- **SQLite**: Works out of the box, no setup needed
+- **PostgreSQL**: Ensure connection string is correct
+  - Format: `postgresql+psycopg://user:password@host:5432/dbname`
+  - Check that database exists and credentials are correct
+
+### Storage Directory Issues
+
+- The app creates `./storage` directory automatically
+- If creation fails, check file permissions
+- On cloud platforms, ensure write access to working directory
 
 ## Support
 
