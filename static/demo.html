@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice Automation Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+            margin-top: 40px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            background: #f8f9ff;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .file-label {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+        .file-label:hover {
+            background: #5568d3;
+        }
+        .file-name {
+            margin-top: 10px;
+            color: #666;
+            font-size: 0.9em;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 10px;
+        }
+        button:hover:not(:disabled) {
+            background: #5568d3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            display: none;
+        }
+        .results.show {
+            display: block;
+        }
+        .results h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+        .field {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px;
+            margin: 8px 0;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #555;
+            text-transform: capitalize;
+        }
+        .field-value {
+            color: #333;
+            font-weight: 500;
+        }
+        .field-value.null {
+            color: #999;
+            font-style: italic;
+        }
+        .error {
+            background: #fee;
+            border-left-color: #e74c3c;
+            padding: 15px;
+            border-radius: 6px;
+            color: #c0392b;
+            margin-top: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 500;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .disclaimer {
+            margin-top: 30px;
+            padding: 15px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            border-radius: 6px;
+            font-size: 0.9em;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 Invoice Automation Demo</h1>
+        <p class="subtitle">Upload an invoice PDF to extract accounting fields using rule-based extraction</p>
+        
+        <form id="uploadForm">
+            <div class="upload-area">
+                <label for="fileInput" class="file-label">Choose Invoice PDF</label>
+                <input type="file" id="fileInput" name="attachment" accept=".pdf" required>
+                <div class="file-name" id="fileName"></div>
+            </div>
+            <button type="submit" id="submitBtn">Extract Fields</button>
+        </form>
+        
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Processing invoice... This may take a few seconds.</p>
+        </div>
+        
+        <div id="results" class="results">
+            <h2>Extracted Fields</h2>
+            <div id="fieldsContainer"></div>
+        </div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+        
+        <div class="disclaimer">
+            <strong>Demo Notice:</strong> This is a demonstration system. Uploaded files are processed for demo purposes only. No permanent data storage is guaranteed.
+        </div>
+    </div>
+    
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const uploadForm = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const fieldsContainer = document.getElementById('fieldsContainer');
+        const errorDiv = document.getElementById('error');
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileName.textContent = 'Selected: ' + e.target.files[0].name;
+            } else {
+                fileName.textContent = '';
+            }
+        });
+        
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            // Show loading, hide results and errors
+            loading.style.display = 'block';
+            results.classList.remove('show');
+            errorDiv.style.display = 'none';
+            submitBtn.disabled = true;
+            
+            const formData = new FormData();
+            formData.append('attachment', file);
+            
+            try {
+                const response = await fetch('/demo/upload-invoice', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+                
+                if (data.status === 'success' && data.extracted_fields) {
+                    // Display extracted fields
+                    fieldsContainer.innerHTML = '';
+                    
+                    const fields = data.extracted_fields;
+                    const fieldLabels = {
+                        invoice_number: 'Invoice Number',
+                        invoice_date: 'Invoice Date',
+                        vendor_name: 'Vendor Name',
+                        subtotal: 'Subtotal',
+                        tax: 'Tax',
+                        vat: 'VAT',
+                        total: 'Total',
+                        currency: 'Currency'
+                    };
+                    
+                    for (const [key, value] of Object.entries(fields)) {
+                        const fieldDiv = document.createElement('div');
+                        fieldDiv.className = 'field';
+                        
+                        const label = document.createElement('span');
+                        label.className = 'field-label';
+                        label.textContent = fieldLabels[key] || key.replace('_', ' ');
+                        
+                        const valueSpan = document.createElement('span');
+                        valueSpan.className = 'field-value' + (value === null ? ' null' : '');
+                        valueSpan.textContent = value === null ? 'Not found' : value;
+                        
+                        fieldDiv.appendChild(label);
+                        fieldDiv.appendChild(valueSpan);
+                        fieldsContainer.appendChild(fieldDiv);
+                    }
+                    
+                    results.classList.add('show');
+                } else {
+                    // Show error
+                    errorDiv.textContent = data.error || 'Extraction failed. Please try again.';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+                errorDiv.textContent = 'Error: ' + error.message;
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+
