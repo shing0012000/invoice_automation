@@ -1,10 +1,10 @@
 # Invoice Automation Demo
 
-A FastAPI-based invoice processing system that extracts accounting fields from invoice PDFs using rule-based extraction (no ML/AI).
+A FastAPI-based invoice processing system that extracts accounting fields from invoice PDFs using a **multi-level extraction pipeline** (Level 1: OCR, Level 2: Structural Parser, Level 3: Semantic Extractor).
 
 ## What This Demo Does
 
-- **Upload Invoice PDFs**: Users can upload invoice PDFs through a web interface
+- **Upload Invoice Files**: Users can upload invoice PDFs or images (PNG, JPEG, TIFF) through a web interface
 - **Extract Fields**: Automatically extracts key accounting fields:
   - Invoice Number
   - Invoice Date
@@ -13,7 +13,11 @@ A FastAPI-based invoice processing system that extracts accounting fields from i
   - Tax/VAT
   - Total Amount
   - Currency
-- **Rule-Based Extraction**: Uses deterministic regex patterns and string heuristics (no machine learning)
+- **Multi-Level Extraction**: Uses three levels of extraction with intelligent fallback:
+  - **Level 1 (OCR)**: Basic text extraction from PDFs and images
+  - **Level 1.5 (Rule-Based)**: Regex patterns and string heuristics (always enabled)
+  - **Level 2 (Structural)**: Understands geometry, tables, and layout (enabled by default, works best with PDFs)
+  - **Level 3 (Semantic)**: ML/LLM-based semantic understanding (optional, requires API keys)
 
 ## Demo Limitations
 
@@ -134,6 +138,48 @@ If you want to use PostgreSQL locally:
 - **Environment**: Python 3
 - **Plan**: Free tier works for demo
 
+## Multi-Level Extraction System
+
+This system uses a three-level extraction pipeline inspired by Google Document AI:
+
+### Level 1: Basic OCR
+- Extracts raw text from PDFs using `pdfplumber` and `PyPDF2`
+- Handles text-based PDFs (not scanned images)
+- Always enabled
+
+### Level 1.5: Rule-Based Extraction
+- Uses regex patterns and string heuristics
+- Deterministic and explainable
+- Always enabled as baseline fallback
+
+### Level 2: Structural Parser (Document AI OCR/Form Parser equivalent)
+- **Understands geometry**: Uses bounding boxes (X, Y coordinates) of words
+- **Recognizes layout**: Identifies tables, form fields, and spatial relationships
+- **Table-aware**: Extracts data from structured tables, not just text patterns
+- **Enabled by default** (set `ENABLE_LEVEL_2_EXTRACTION=false` to disable)
+
+**Key Features:**
+- Processes tables as structured data
+- Understands spatial relationships (e.g., "Total" near a number = total amount)
+- Layout-aware extraction (finds fields regardless of position)
+
+### Level 3: Semantic Extractor (Document AI Specialized/GenAI equivalent)
+- **Semantic understanding**: Understands meaning, not just patterns
+- **Layout-agnostic**: Finds "Total" whether it's at top, bottom, or in a table
+- **Context-aware**: Distinguishes "Billing Address" from "Shipping Address" even if unlabeled
+- **Requires API keys** (OpenAI or Google Document AI)
+- **Disabled by default** (set `ENABLE_LEVEL_3_EXTRACTION=true` and configure API keys)
+
+**Supported Services:**
+- **OpenAI GPT**: Set `OPENAI_API_KEY` and `OPENAI_MODEL` (default: `gpt-3.5-turbo`)
+- **Google Document AI**: Set `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT_ID`, and `GOOGLE_DOCUMENT_AI_PROCESSOR_ID`
+
+**How It Works:**
+1. Pipeline tries Level 1.5 (rule-based) first
+2. Then Level 2 (structural) if enabled - overrides rule-based results
+3. Finally Level 3 (semantic) if enabled - overrides all lower levels
+4. Results are merged intelligently (higher levels take precedence)
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -143,6 +189,15 @@ If you want to use PostgreSQL locally:
 | `MAX_ATTEMPTS` | Maximum retry attempts for processing | `5` |
 | `DEMO_MODE` | Enable demo mode (hides Swagger, exposes only demo endpoints) | `false` |
 | `PORT` | Server port (Render sets this automatically) | `8000` |
+| `ENABLE_LEVEL_2_EXTRACTION` | Enable Level 2 (Structural Parser) | `true` |
+| `ENABLE_LEVEL_3_EXTRACTION` | Enable Level 3 (Semantic Extractor) | `false` |
+| `ENABLE_SEMANTIC_EXTRACTION` | Enable semantic extraction (required for Level 3) | `false` |
+| `OPENAI_API_KEY` | OpenAI API key for Level 3 extraction (optional) | - |
+| `OPENAI_MODEL` | OpenAI model to use (e.g., `gpt-3.5-turbo`, `gpt-4`) | `gpt-3.5-turbo` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to Google Cloud credentials JSON (optional) | - |
+| `GOOGLE_CLOUD_PROJECT_ID` | Google Cloud project ID (optional) | - |
+| `GOOGLE_DOCUMENT_AI_PROCESSOR_ID` | Document AI processor ID (optional) | - |
+| `GOOGLE_CLOUD_LOCATION` | Google Cloud location (optional) | `us` |
 
 ## API Endpoints
 
@@ -177,8 +232,14 @@ invoice_automation/
 │   ├── schemas.py           # Pydantic schemas
 │   ├── crud.py              # Database operations
 │   ├── worker.py            # Background worker functions
+│   ├── pdf_extraction.py     # Level 1: PDF text extraction
+│   ├── image_extraction.py   # Level 1: Image OCR extraction
+│   ├── text_extraction.py    # Unified text extraction (PDF + images)
 │   └── extraction/
-│       └── rule_based.py   # Rule-based field extraction
+│       ├── rule_based.py     # Level 1.5: Rule-based field extraction
+│       ├── structural.py     # Level 2: Structural parser (geometry, tables)
+│       ├── semantic.py        # Level 3: Semantic extractor (ML/LLM)
+│       └── pipeline.py        # Multi-level extraction orchestrator
 ├── static/
 │   └── demo.html            # Demo UI page
 ├── requirements.txt         # Python dependencies
@@ -189,10 +250,31 @@ invoice_automation/
 
 ## How It Works
 
-1. **Ingestion**: Invoice PDF is uploaded and stored
-2. **OCR Simulation**: OCR text is generated (currently simulated)
-3. **Extraction**: Rule-based extraction parses OCR text for accounting fields
-4. **Response**: Extracted fields are returned to the user
+1. **Ingestion**: Invoice file (PDF or image) is uploaded and stored
+2. **Level 1 (OCR)**: Text is extracted from:
+   - **PDF files**: Using `pdfplumber`/`PyPDF2`
+   - **Image files**: Using Tesseract OCR (`pytesseract`) or EasyOCR (fallback)
+3. **Multi-Level Extraction**: Pipeline extracts fields using:
+   - Level 1.5: Rule-based patterns (always runs)
+   - Level 2: Structural analysis (tables, geometry) - if enabled (works best with PDFs)
+   - Level 3: Semantic understanding (ML/LLM) - if enabled and configured
+4. **Response**: Extracted fields are merged and returned to the user
+
+## Supported File Formats
+
+### PDF Files
+- Text-based PDFs (extracted directly)
+- Scanned PDFs (may require OCR if text extraction fails)
+
+### Image Files
+- **PNG** (.png)
+- **JPEG** (.jpg, .jpeg)
+- **TIFF** (.tif, .tiff)
+- **BMP** (.bmp)
+- **GIF** (.gif)
+- **WebP** (.webp)
+
+Images are processed using OCR (Tesseract or EasyOCR) to extract text.
 
 ## Technology Stack
 
@@ -200,6 +282,13 @@ invoice_automation/
 - **SQLAlchemy**: ORM and database management
 - **PostgreSQL/SQLite**: Database
 - **Pydantic**: Data validation
+- **pdfplumber**: PDF text extraction and structural analysis
+- **PyPDF2**: PDF text extraction (fallback)
+- **Pillow**: Image processing
+- **pytesseract**: OCR for images (requires Tesseract OCR system library)
+- **EasyOCR** (optional): Alternative OCR library (no system dependencies)
+- **OpenAI API** (optional): Level 3 semantic extraction
+- **Google Document AI** (optional): Level 3 semantic extraction
 - **Python 3.8+**: Runtime
 
 ## License

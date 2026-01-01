@@ -6,4 +6,14 @@ pydantic-settings
 python-multipart
 PyPDF2
 pdfplumber
+Pillow  # Image processing (also used by pdfplumber)
+pytesseract  # OCR for images (requires Tesseract OCR installed on system)
+
+# Optional dependencies for Level 3 (Semantic Extraction)
+# Uncomment to enable:
+# openai>=1.0.0  # For OpenAI GPT-based extraction
+# google-cloud-documentai>=2.0.0  # For Google Document AI
+
+# Optional: Alternative OCR (easier to install, no system dependencies)
+# easyocr  # Alternative OCR library (slower but easier setup)
 

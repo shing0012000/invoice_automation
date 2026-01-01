@@ -269,58 +269,59 @@ def worker_loop():
                     # Mark pending (prevents double-processing if multiple workers)
                     mark_ocr_pending(db, ocr_job)
 
-                    # Extract text from PDF file
-                    from app.pdf_extraction import extract_text_from_pdf
+                    # Extract text from file (PDF or image)
+                    from app.text_extraction import extract_text_from_file, is_supported_file_type
                     
                     ocr_text = None
                     # Resolve path (handle both relative and absolute)
-                    pdf_path = ocr_job.storage_path
-                    if pdf_path:
+                    file_path = ocr_job.storage_path
+                    if file_path:
                         # Try absolute path first, then relative
-                        if not os.path.isabs(pdf_path):
-                            pdf_path = os.path.abspath(pdf_path)
+                        if not os.path.isabs(file_path):
+                            file_path = os.path.abspath(file_path)
                         
-                        logger.info(f"Extracting text from PDF: {pdf_path}")
-                        logger.info(f"  - Path exists: {os.path.exists(pdf_path)}")
-                        if os.path.exists(pdf_path):
-                            file_size = os.path.getsize(pdf_path)
+                        logger.info(f"Extracting text from file: {file_path}")
+                        logger.info(f"  - Path exists: {os.path.exists(file_path)}")
+                        logger.info(f"  - Content type: {ocr_job.content_type}")
+                        logger.info(f"  - Filename: {ocr_job.filename}")
+                        
+                        if os.path.exists(file_path):
+                            file_size = os.path.getsize(file_path)
                             logger.info(f"  - File size: {file_size} bytes")
-                            # Verify it's actually a PDF
-                            try:
-                                with open(pdf_path, 'rb') as f:
-                                    header = f.read(4)
-                                    if header == b'%PDF':
-                                        logger.info(f"  - PDF header verified: {header}")
-                                    else:
-                                        logger.warning(f"  - ⚠ File doesn't start with PDF header: {header}")
-                            except Exception as e:
-                                logger.warning(f"  - Could not verify PDF header: {e}")
+                            
+                            # Check if file type is supported
+                            if not is_supported_file_type(file_path, ocr_job.content_type):
+                                error_msg = f"Unsupported file type: {ocr_job.content_type or 'unknown'}. Supported: PDF, PNG, JPEG, TIFF"
+                                logger.warning(f"Invoice {ocr_job.id}: {error_msg}")
+                                mark_retry(db, ocr_job, error=error_msg)
+                                db.close()
+                                continue
                         
-                        if os.path.exists(pdf_path):
-                            ocr_text = extract_text_from_pdf(pdf_path)
+                        if os.path.exists(file_path):
+                            # Use unified extraction (handles both PDF and images)
+                            ocr_text = extract_text_from_file(file_path, ocr_job.content_type)
                         else:
-                            logger.error(f"  - PDF file not found at: {pdf_path}")
+                            logger.error(f"  - File not found at: {file_path}")
                             logger.error(f"  - Current working directory: {os.getcwd()}")
                             logger.error(f"  - Storage dir: {os.path.abspath(settings.storage_dir)}")
                         
                         if not ocr_text:
                             # If extraction fails, mark as retryable error
-                            error_msg = "PDF text extraction failed - file may be image-based or corrupted"
+                            error_msg = "Text extraction failed - file may be corrupted or unsupported format"
                             logger.warning(f"Invoice {ocr_job.id}: {error_msg}")
                             # Log additional diagnostics
-                            logger.warning(f"  - File path: {pdf_path}")
-                            logger.warning(f"  - File exists: {os.path.exists(pdf_path) if pdf_path else False}")
-                            if pdf_path and os.path.exists(pdf_path):
-                                logger.warning(f"  - File size: {os.path.getsize(pdf_path)} bytes")
+                            logger.warning(f"  - File path: {file_path}")
+                            logger.warning(f"  - File exists: {os.path.exists(file_path) if file_path else False}")
+                            if file_path and os.path.exists(file_path):
+                                logger.warning(f"  - File size: {os.path.getsize(file_path)} bytes")
                             mark_retry(db, ocr_job, error=error_msg)
                             db.close()
                             continue
                     else:
-                        error_msg = f"PDF file not found: {ocr_job.storage_path}"
+                        error_msg = f"File not found: {ocr_job.storage_path}"
                         logger.error(f"Invoice {ocr_job.id}: {error_msg}")
                         logger.error(f"  - Current working directory: {os.getcwd()}")
                         logger.error(f"  - Storage dir: {os.path.abspath(settings.storage_dir)}")
-                        logger.error(f"  - Tried path: {pdf_path if 'pdf_path' in locals() else 'N/A'}")
                         mark_retry(db, ocr_job, error=error_msg)
                         db.close()
                         continue
@@ -339,17 +340,33 @@ def worker_loop():
             extraction_job = pick_next_extraction_job(db)
             if extraction_job:
                 try:
-                    from app.extraction.rule_based import extract_invoice_fields
+                    from app.extraction.pipeline import extract_invoice_fields_multi_level, get_extraction_level_config
                     
-                    # Extract fields from OCR text
-                    extracted_fields = extract_invoice_fields(extraction_job.ocr_text or "")
+                    # Get extraction level configuration
+                    level_config = get_extraction_level_config()
+                    
+                    # Resolve absolute path for file (PDF or image)
+                    file_path = os.path.abspath(extraction_job.storage_path) if extraction_job.storage_path else None
+                    
+                    # Extract fields using multi-level pipeline
+                    # Level 1 (OCR) already done - ocr_text available
+                    # Level 2 (Structural): Enabled by default (works best with PDFs)
+                    # Level 3 (Semantic): Requires API keys, disabled by default
+                    extracted_fields = extract_invoice_fields_multi_level(
+                        file_path=file_path,
+                        ocr_text=extraction_job.ocr_text or "",
+                        enable_level_2=level_config["enable_level_2"],
+                        enable_level_3=level_config["enable_level_3"]
+                    )
                     
                     # Mark as extracted (even if some fields are None, that's OK)
                     mark_extracted(db, extraction_job, extracted_fields)
+                    logger.info(f"Invoice {extraction_job.id}: Multi-level extraction complete.")
                     
                 except Exception as e:
                     # Log error but don't crash - mark as failed
                     error_msg = f"Extraction failed: {str(e)}"
+                    logger.error(f"Invoice {extraction_job.id}: {error_msg}", exc_info=True)
                     mark_extraction_failed(db, extraction_job, error_msg)
                 finally:
                     db.close()
