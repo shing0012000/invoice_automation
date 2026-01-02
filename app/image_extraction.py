@@ -87,6 +87,32 @@ def extract_text_from_image(file_path: str) -> Optional[str]:
         )
         return None
     
+    # Configure pytesseract to find Tesseract binary
+    # This is especially important for conda installations
+    try:
+        import shutil
+        tesseract_cmd = shutil.which('tesseract')
+        if tesseract_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+            logger.debug(f"Configured pytesseract to use: {tesseract_cmd}")
+        else:
+            # Fallback: try common conda paths
+            conda_paths = [
+                os.path.join(os.environ.get('CONDA_PREFIX', ''), 'bin', 'tesseract'),
+                '/opt/anaconda3/envs/acctapp/bin/tesseract',
+                '/usr/local/bin/tesseract',
+                '/usr/bin/tesseract',
+            ]
+            for path in conda_paths:
+                if path and os.path.exists(path):
+                    pytesseract.pytesseract.tesseract_cmd = path
+                    logger.debug(f"Configured pytesseract to use: {path}")
+                    break
+            else:
+                logger.warning("Could not find tesseract binary. OCR may fail.")
+    except Exception as e:
+        logger.warning(f"Error configuring pytesseract path: {e}")
+    
     try:
         # Open image
         logger.info(f"Opening image file: {file_path}")

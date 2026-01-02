@@ -12,6 +12,7 @@ pytesseract  # OCR for images (requires Tesseract OCR installed on system)
 # Optional dependencies for Level 3 (Semantic Extraction)
 # Uncomment to enable:
 # openai>=1.0.0  # For OpenAI GPT-based extraction
+google-generativeai>=0.3.0  # For Google Gemini API (cheaper/faster) - Level 3
 # google-cloud-documentai>=2.0.0  # For Google Document AI
 
 # Optional: Alternative OCR (easier to install, no system dependencies)

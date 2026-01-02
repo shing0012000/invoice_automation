@@ -167,12 +167,12 @@
 <body>
     <div class="container">
         <h1>📄 Invoice Automation Demo</h1>
-        <p class="subtitle">Upload an invoice PDF to extract accounting fields using rule-based extraction</p>
+        <p class="subtitle">Upload an invoice PDF or image (PNG, JPEG, TIFF) to extract accounting fields</p>
         
         <form id="uploadForm">
             <div class="upload-area">
-                <label for="fileInput" class="file-label">Choose Invoice PDF</label>
-                <input type="file" id="fileInput" name="attachment" accept=".pdf" required>
+                <label for="fileInput" class="file-label">Choose Invoice File</label>
+                <input type="file" id="fileInput" name="attachment" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.gif,.webp" required>
                 <div class="file-name" id="fileName"></div>
             </div>
             <button type="submit" id="submitBtn">Extract Fields</button>
@@ -252,13 +252,33 @@
                         invoice_date: 'Invoice Date',
                         vendor_name: 'Vendor Name',
                         subtotal: 'Subtotal',
-                        tax: 'Tax',
-                        vat: 'VAT',
+                        discount: 'Discount',
+                        tax: 'Tax/VAT',
                         total: 'Total',
                         currency: 'Currency'
                     };
                     
-                    for (const [key, value] of Object.entries(fields)) {
+                    // Skip internal fields
+                    const skipFields = ['reconciliation_status', 'reconciliation_error'];
+                    
+                    // Helper to extract value and confidence from field data
+                    function getFieldValue(fieldData) {
+                        if (fieldData === null || fieldData === undefined) return { value: null, confidence: 0, notes: null };
+                        if (typeof fieldData === 'object' && 'value' in fieldData) {
+                            return {
+                                value: fieldData.value,
+                                confidence: fieldData.confidence || 0.9,
+                                notes: fieldData.notes || null
+                            };
+                        }
+                        return { value: fieldData, confidence: 0.9, notes: null };
+                    }
+                    
+                    for (const [key, fieldData] of Object.entries(fields)) {
+                        if (skipFields.includes(key)) continue;
+                        
+                        const { value, confidence, notes } = getFieldValue(fieldData);
+                        
                         const fieldDiv = document.createElement('div');
                         fieldDiv.className = 'field';
                         
@@ -268,11 +288,58 @@
                         
                         const valueSpan = document.createElement('span');
                         valueSpan.className = 'field-value' + (value === null ? ' null' : '');
-                        valueSpan.textContent = value === null ? 'Not found' : value;
+                        
+                        // Handle tax field (now a dict with amount and type)
+                        if (key === 'tax' && value && typeof value === 'object' && 'amount' in value) {
+                            const taxType = value.type === 'vat' ? 'VAT' : 'Tax';
+                            const taxAmount = value.amount || 'N/A';
+                            valueSpan.textContent = `${taxType}: ${taxAmount}`;
+                        } else {
+                            valueSpan.textContent = value === null ? 'Not found' : value;
+                        }
+                        
+                        // Add confidence indicator
+                        if (value !== null) {
+                            const confidenceBadge = document.createElement('span');
+                            confidenceBadge.className = 'confidence-badge';
+                            confidenceBadge.textContent = `(${(confidence * 100).toFixed(0)}%)`;
+                            confidenceBadge.style.marginLeft = '8px';
+                            confidenceBadge.style.fontSize = '0.85em';
+                            confidenceBadge.style.color = confidence >= 0.9 ? '#28a745' : confidence >= 0.5 ? '#ffc107' : '#dc3545';
+                            valueSpan.appendChild(confidenceBadge);
+                            
+                            // Add notes tooltip if present
+                            if (notes) {
+                                valueSpan.title = notes;
+                                valueSpan.style.cursor = 'help';
+                            }
+                        }
                         
                         fieldDiv.appendChild(label);
                         fieldDiv.appendChild(valueSpan);
                         fieldsContainer.appendChild(fieldDiv);
+                    }
+                    
+                    // Show confidence status
+                    if (data.confidence_status) {
+                        const statusDiv = document.createElement('div');
+                        statusDiv.className = 'field status';
+                        const statusColors = {
+                            'VERIFIED': '#28a745',
+                            'REVIEW': '#ffc107',
+                            'ERROR': '#dc3545'
+                        };
+                        statusDiv.innerHTML = `<span class="field-label">Confidence Status:</span><span class="field-value" style="color: ${statusColors[data.confidence_status] || '#666'}">${data.confidence_status}</span>`;
+                        fieldsContainer.appendChild(statusDiv);
+                    }
+                    
+                    // Show reconciliation status if present
+                    if (fields.reconciliation_status === 'inconsistent') {
+                        const warningDiv = document.createElement('div');
+                        warningDiv.className = 'field warning';
+                        warningDiv.innerHTML = '<span class="field-label">⚠️ Warning:</span><span class="field-value">Amounts do not reconcile. ' + 
+                            (fields.reconciliation_error || 'Check extracted values.') + '</span>';
+                        fieldsContainer.appendChild(warningDiv);
                     }
                     
                     results.classList.add('show');

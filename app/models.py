@@ -14,6 +14,12 @@ class InvoiceStatus(str, enum.Enum):
     FAILED_RETRYABLE = "FAILED_RETRYABLE"
     FAILED_FINAL = "FAILED_FINAL"
 
+
+class ConfidenceStatus(str, enum.Enum):
+    VERIFIED = "VERIFIED"  # Validation passed, high confidence
+    REVIEW = "REVIEW"      # LLM fixed discrepancies, needs review
+    ERROR = "ERROR"        # Validation failed, extraction unreliable
+
 class Invoice(Base):
     __tablename__ = "invoices"
 
@@ -41,6 +47,13 @@ class Invoice(Base):
     # Use JSON instead of JSONB for portability (works on both PostgreSQL and SQLite)
     ocr_text: Mapped[str] = mapped_column(Text, nullable=True)
     extracted_fields: Mapped[dict] = mapped_column(JSON, nullable=True)
+    
+    # Confidence status for client trust indicators
+    confidence_status: Mapped[ConfidenceStatus] = mapped_column(
+        Enum(ConfidenceStatus), 
+        default=ConfidenceStatus.ERROR, 
+        index=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -1,7 +1,7 @@
 import os
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
-from typing import Union
+from typing import Union, Optional
 
 class Settings(BaseSettings):
     """
@@ -41,6 +41,34 @@ class Settings(BaseSettings):
         le=65535,
         description="Server port (cloud platforms set PORT automatically)"
     )
+    
+    # LLM/Semantic extraction settings
+    enable_level_3_extraction: bool = Field(
+        default=False,
+        description="Enable Level 3 (Semantic/LLM) extraction capability (requires API keys)"
+    )
+    
+    enable_semantic_extraction: bool = Field(
+        default=False,
+        description="Enable semantic extraction (required for Level 3 to work)"
+    )
+    
+    google_api_key: Optional[str] = Field(
+        default=None,
+        description="Google Gemini API key for Level 3 semantic extraction"
+    )
+    
+    use_llm_fallback: bool = Field(
+        default=True,
+        description="Use smart LLM fallback - only call LLM when rule-based extraction fails on critical fields (cost optimization)"
+    )
+    
+    min_extraction_rate: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum extraction rate (0.0-1.0) to avoid LLM. If rule-based extracts >= this rate, skip LLM. Default: 0.5 (50%)"
+    )
 
     @field_validator('database_url')
     @classmethod
@@ -59,10 +87,10 @@ class Settings(BaseSettings):
             )
         return v
     
-    @field_validator('demo_mode', mode='before')
+    @field_validator('demo_mode', 'enable_level_3_extraction', 'enable_semantic_extraction', 'use_llm_fallback', mode='before')
     @classmethod
-    def parse_demo_mode(cls, v: Union[str, bool]) -> bool:
-        """Parse demo mode from string or boolean."""
+    def parse_bool(cls, v: Union[str, bool]) -> bool:
+        """Parse boolean from string or boolean."""
         if isinstance(v, bool):
             return v
         if isinstance(v, str):
@@ -73,7 +101,7 @@ class Settings(BaseSettings):
                 return False
             else:
                 raise ValueError(
-                    f"Invalid DEMO_MODE value: '{v}'. "
+                    f"Invalid boolean value: '{v}'. "
                     "Must be one of: true, false, 1, 0, yes, no, on, off"
                 )
         return False

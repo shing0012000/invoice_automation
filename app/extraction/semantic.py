@@ -15,7 +15,13 @@ import os
 logger = logging.getLogger(__name__)
 
 
-def extract_semantic_fields(file_path: str, ocr_text: str, structural_fields: Dict[str, Any] = None) -> Dict[str, Any]:
+def extract_semantic_fields(
+    file_path: str, 
+    ocr_text: str, 
+    structural_fields: Dict[str, Any] = None,
+    validation_error: Optional[str] = None,
+    ocr_error_hint: str = ""
+) -> Dict[str, Any]:
     """
     Extract invoice fields using semantic understanding (ML/LLM-based).
     
@@ -25,6 +31,8 @@ def extract_semantic_fields(file_path: str, ocr_text: str, structural_fields: Di
         file_path: Path to the file (PDF or image)
         ocr_text: Raw OCR text from Level 1
         structural_fields: Fields extracted by Level 2 (for context)
+        validation_error: Error message from Level 2 validation (if failed)
+        ocr_error_hint: Specific hint about OCR errors (e.g., '5' vs '$')
     
     Returns:
         Dictionary with extracted fields (same structure as rule_based.py)
@@ -37,11 +45,19 @@ def extract_semantic_fields(file_path: str, ocr_text: str, structural_fields: Di
         logger.debug("Semantic extraction is disabled (set ENABLE_SEMANTIC_EXTRACTION=true to enable)")
         return {}
     
-    # Try OpenAI API first (if configured)
+    # Try Google Gemini API first (if configured) - cheaper/faster than OpenAI
+    google_api_key = os.getenv("GOOGLE_API_KEY")
+    if google_api_key:
+        try:
+            return _extract_with_gemini(ocr_text, structural_fields, validation_error, ocr_error_hint)
+        except Exception as e:
+            logger.warning(f"Google Gemini semantic extraction failed: {e}")
+    
+    # Try OpenAI API (if configured)
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if openai_api_key:
         try:
-            return _extract_with_openai(ocr_text, structural_fields)
+            return _extract_with_openai(ocr_text, structural_fields, validation_error, ocr_error_hint)
         except Exception as e:
             logger.warning(f"OpenAI semantic extraction failed: {e}")
     
@@ -59,11 +75,110 @@ def extract_semantic_fields(file_path: str, ocr_text: str, structural_fields: Di
     return {}
 
 
-def _extract_with_openai(ocr_text: str, structural_fields: Dict[str, Any] = None) -> Dict[str, Any]:
+def _extract_with_gemini(
+    ocr_text: str, 
+    structural_fields: Dict[str, Any] = None,
+    validation_error: Optional[str] = None,
+    ocr_error_hint: str = ""
+) -> Dict[str, Any]:
+    """
+    Use Google Gemini to extract invoice fields with semantic understanding.
+    
+    Gemini is cheaper and faster than OpenAI for structured extraction tasks.
+    """
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        logger.warning("Google Generative AI library not installed. Install with: pip install google-generativeai")
+        return {}
+    
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return {}
+    
+    genai.configure(api_key=api_key)
+    
+    # Build context from structural fields if available
+    context = ""
+    if structural_fields:
+        context = f"Previously extracted fields (may contain errors): {structural_fields}\n\n"
+    
+    # Add validation error context if Level 2 validation failed
+    validation_context = ""
+    if validation_error:
+        validation_context = f"IMPORTANT: Level 2 extraction failed validation: {validation_error}\n"
+        validation_context += "Please carefully re-extract fields to fix these issues.\n\n"
+    
+    # Add OCR error hint
+    ocr_context = ocr_error_hint if ocr_error_hint else ""
+    
+    prompt = f"""Extract invoice fields from the following OCR text. 
+Use semantic understanding to identify fields even if they're not explicitly labeled.
+
+{context}{validation_context}{ocr_context}OCR Text:
+{ocr_text[:4000]}
+
+Note: Text truncated to 4000 characters to avoid token limits.
+
+CRITICAL REQUIREMENTS:
+1. Ensure total = subtotal - discount + tax (within 0.02 cent tolerance)
+2. invoice_number must NOT be a table header like "AMOUNT", "DESCRIPTION", "QTY"
+3. All critical fields (invoice_number, total, invoice_date) must be present
+4. If amounts start with '5', check if it should be '$' (dollar sign) - common OCR error
+
+Extract the following fields (return JSON only, no explanation):
+- invoice_number: Invoice number or ID (NOT a table header)
+- invoice_date: Invoice date in YYYY-MM-DD format
+- vendor_name: Company/supplier name
+- subtotal: Subtotal amount (before tax/discount)
+- discount: Discount amount (negative value, or null if none)
+- tax: Tax/VAT as object: {{"amount": "80.93", "type": "sales_tax"}} or {{"amount": "80.93", "type": "vat"}}
+- total: Total amount due (final balance, must equal subtotal - discount + tax)
+- currency: Currency code (USD, EUR, etc.)
+
+Return only valid JSON with null for missing fields. Example:
+{{"invoice_number": "INV-001", "invoice_date": "2025-12-30", "vendor_name": "Acme Corp", "subtotal": "1000.00", "discount": "-50.00", "tax": {{"amount": "100.00", "type": "sales_tax"}}, "total": "1050.00", "currency": "USD"}}
+"""
+    
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,  # Low temperature for consistent extraction
+                max_output_tokens=500
+            )
+        )
+        
+        import json
+        result_text = response.text.strip()
+        
+        # Remove markdown code blocks if present
+        if result_text.startswith("```"):
+            result_text = result_text.split("```")[1]
+            if result_text.startswith("json"):
+                result_text = result_text[4:]
+        
+        result = json.loads(result_text)
+        logger.info("Google Gemini semantic extraction completed successfully")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Google Gemini API call failed: {e}")
+        return {}
+
+
+def _extract_with_openai(
+    ocr_text: str, 
+    structural_fields: Dict[str, Any] = None,
+    validation_error: Optional[str] = None,
+    ocr_error_hint: str = ""
+) -> Dict[str, Any]:
     """
     Use OpenAI GPT to extract invoice fields with semantic understanding.
     
     This understands context: "Total" = final balance, not subtotal.
+    Handles OCR errors and validation failures from Level 2.
     """
     try:
         from openai import OpenAI
@@ -80,28 +195,43 @@ def _extract_with_openai(ocr_text: str, structural_fields: Dict[str, Any] = None
     # Build context from structural fields if available
     context = ""
     if structural_fields:
-        context = f"Previously extracted fields: {structural_fields}\n\n"
+        context = f"Previously extracted fields (may contain errors): {structural_fields}\n\n"
+    
+    # Add validation error context if Level 2 validation failed
+    validation_context = ""
+    if validation_error:
+        validation_context = f"IMPORTANT: Level 2 extraction failed validation: {validation_error}\n"
+        validation_context += "Please carefully re-extract fields to fix these issues.\n\n"
+    
+    # Add OCR error hint
+    ocr_context = ocr_error_hint if ocr_error_hint else ""
     
     prompt = f"""Extract invoice fields from the following OCR text. 
 Use semantic understanding to identify fields even if they're not explicitly labeled.
 
-{context}OCR Text:
+{context}{validation_context}{ocr_context}OCR Text:
 {ocr_text[:4000]}
 
 Note: Text truncated to 4000 characters to avoid token limits.
 
+CRITICAL REQUIREMENTS:
+1. Ensure total = subtotal - discount + tax (within 0.02 cent tolerance)
+2. invoice_number must NOT be a table header like "AMOUNT", "DESCRIPTION", "QTY"
+3. All critical fields (invoice_number, total, invoice_date) must be present
+4. If amounts start with '5', check if it should be '$' (dollar sign) - common OCR error
+
 Extract the following fields (return JSON only, no explanation):
-- invoice_number: Invoice number or ID
+- invoice_number: Invoice number or ID (NOT a table header)
 - invoice_date: Invoice date in YYYY-MM-DD format
 - vendor_name: Company/supplier name
-- subtotal: Subtotal amount (before tax)
-- tax: Tax amount
-- vat: VAT amount (if different from tax)
-- total: Total amount due (final balance)
+- subtotal: Subtotal amount (before tax/discount)
+- discount: Discount amount (negative value, or null if none)
+- tax: Tax/VAT as object: {{"amount": "80.93", "type": "sales_tax"}} or {{"amount": "80.93", "type": "vat"}}
+- total: Total amount due (final balance, must equal subtotal - discount + tax)
 - currency: Currency code (USD, EUR, etc.)
 
 Return only valid JSON with null for missing fields. Example:
-{{"invoice_number": "INV-001", "invoice_date": "2025-12-30", "vendor_name": "Acme Corp", "subtotal": "1000.00", "tax": "100.00", "vat": null, "total": "1100.00", "currency": "USD"}}
+{{"invoice_number": "INV-001", "invoice_date": "2025-12-30", "vendor_name": "Acme Corp", "subtotal": "1000.00", "discount": "-50.00", "tax": {{"amount": "100.00", "type": "sales_tax"}}, "total": "1050.00", "currency": "USD"}}
 """
     
     try:

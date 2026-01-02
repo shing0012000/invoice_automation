@@ -1,7 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
-from app.models import InvoiceStatus
+from app.models import InvoiceStatus, ConfidenceStatus
 
 class InvoiceOut(BaseModel):
     id: str  # UUID stored as string for portability
@@ -12,6 +12,7 @@ class InvoiceOut(BaseModel):
     sha256: str
     storage_path: str
     status: InvoiceStatus
+    confidence_status: ConfidenceStatus
     attempt_count: int
     next_attempt_at: datetime
     last_error: str

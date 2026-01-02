@@ -67,6 +67,37 @@ async def startup_checks():
         logger.info("Creating database schema...")
         Base.metadata.create_all(bind=engine)
         logger.info("  - Schema creation: SUCCESS")
+        
+        # Migrate: Add confidence_status column if it doesn't exist (for existing databases)
+        try:
+            from sqlalchemy import inspect, text
+            inspector = inspect(engine)
+            
+            # Check if invoices table exists
+            if 'invoices' in inspector.get_table_names():
+                columns = [col['name'] for col in inspector.get_columns('invoices')]
+                
+                if 'confidence_status' not in columns:
+                    logger.info("  - Adding confidence_status column (migration)...")
+                    if engine.dialect.name == 'sqlite':
+                        # SQLite: ALTER TABLE to add column (SQLite stores enum as VARCHAR)
+                        with engine.connect() as conn:
+                            conn.execute(text("ALTER TABLE invoices ADD COLUMN confidence_status VARCHAR(20) DEFAULT 'ERROR'"))
+                            conn.commit()
+                        logger.info("  - Migration: confidence_status column added to SQLite database")
+                    else:
+                        # PostgreSQL: ALTER TABLE to add column
+                        with engine.connect() as conn:
+                            conn.execute(text("ALTER TABLE invoices ADD COLUMN confidence_status VARCHAR(20) DEFAULT 'ERROR'"))
+                            conn.commit()
+                        logger.info("  - Migration: confidence_status column added to PostgreSQL database")
+                else:
+                    logger.debug("  - confidence_status column already exists")
+            else:
+                logger.debug("  - invoices table doesn't exist yet (will be created)")
+        except Exception as migration_error:
+            logger.warning(f"  - Migration check failed (non-fatal): {migration_error}")
+            # Continue - schema creation succeeded
     except Exception as e:
         logger.error(f"  - Schema creation failed: {e}")
         # Don't block startup - health check will catch this
@@ -184,7 +215,8 @@ async def demo_upload_invoice(attachment: UploadFile = File(...)):
         if inv.status == InvoiceStatus.EXTRACTED and inv.extracted_fields:
             return {
                 "status": "success",
-                "extracted_fields": inv.extracted_fields
+                "extracted_fields": inv.extracted_fields,
+                "confidence_status": inv.confidence_status.value if inv.confidence_status else "ERROR"
             }
         elif inv.status == InvoiceStatus.EXTRACTION_FAILED:
             error_msg = inv.last_error or "Field extraction failed"
@@ -348,20 +380,23 @@ def worker_loop():
                     # Resolve absolute path for file (PDF or image)
                     file_path = os.path.abspath(extraction_job.storage_path) if extraction_job.storage_path else None
                     
-                    # Extract fields using multi-level pipeline
+                    # Extract fields using multi-level pipeline with smart LLM fallback
                     # Level 1 (OCR) already done - ocr_text available
+                    # Level 1.5 (Rule-based): Always runs first (free, fast)
                     # Level 2 (Structural): Enabled by default (works best with PDFs)
-                    # Level 3 (Semantic): Requires API keys, disabled by default
-                    extracted_fields = extract_invoice_fields_multi_level(
+                    # Level 3 (Semantic/LLM): Smart fallback - only used when needed (cost optimization)
+                    extracted_fields, confidence_status = extract_invoice_fields_multi_level(
                         file_path=file_path,
                         ocr_text=extraction_job.ocr_text or "",
                         enable_level_2=level_config["enable_level_2"],
-                        enable_level_3=level_config["enable_level_3"]
+                        enable_level_3=level_config["enable_level_3"],
+                        use_llm_fallback=level_config.get("use_llm_fallback", True),
+                        min_extraction_rate=level_config.get("min_extraction_rate", 0.5)
                     )
                     
-                    # Mark as extracted (even if some fields are None, that's OK)
-                    mark_extracted(db, extraction_job, extracted_fields)
-                    logger.info(f"Invoice {extraction_job.id}: Multi-level extraction complete.")
+                    # Mark as extracted with confidence status (even if some fields are None, that's OK)
+                    mark_extracted(db, extraction_job, extracted_fields, confidence_status)
+                    logger.info(f"Invoice {extraction_job.id}: Multi-level extraction complete. Confidence: {confidence_status.value}")
                     
                 except Exception as e:
                     # Log error but don't crash - mark as failed

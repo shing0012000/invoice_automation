@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from app.models import Invoice, InvoiceStatus
+from app.models import Invoice, InvoiceStatus, ConfidenceStatus
 from app.config import settings
 from app.extraction.rule_based import extract_invoice_fields
 
@@ -62,10 +62,11 @@ def pick_next_extraction_job(db: Session) -> Invoice | None:
     )
 
 
-def mark_extracted(db: Session, inv: Invoice, extracted_fields: dict):
-    """Mark invoice as successfully extracted."""
+def mark_extracted(db: Session, inv: Invoice, extracted_fields: dict, confidence_status: ConfidenceStatus = ConfidenceStatus.ERROR):
+    """Mark invoice as successfully extracted with confidence status."""
     inv.status = InvoiceStatus.EXTRACTED
     inv.extracted_fields = extracted_fields
+    inv.confidence_status = confidence_status
     inv.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(inv)
