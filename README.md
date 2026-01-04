@@ -133,10 +133,25 @@ If you want to use PostgreSQL locally:
 
 ### Render Configuration
 
-- **Build Command**: (auto-detected from Procfile)
+**Important**: To use Tesseract OCR on Render, you must set the build command:
+
+- **Build Command**: `chmod +x build.sh && ./build.sh`
+  - This installs Tesseract OCR system package (`tesseract-ocr` and `tesseract-ocr-eng`)
+  - Then installs all Python dependencies from `requirements.txt`
+  - The `build.sh` script handles everything automatically
+  
 - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - **Environment**: Python 3
 - **Plan**: Free tier works for demo
+
+**How to Configure**:
+1. In Render Dashboard → Your Service → Settings
+2. Under "Build Command", set: `chmod +x build.sh && ./build.sh`
+3. Save and redeploy
+
+**Alternative**: If you use `render.yaml`, Render will automatically use the build command specified there.
+
+**Note**: Without the build script, Tesseract OCR won't be available and image extraction will fail. The build script is required for Tesseract OCR on Render.
 
 ## Multi-Level Extraction System
 

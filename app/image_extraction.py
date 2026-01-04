@@ -88,7 +88,7 @@ def extract_text_from_image(file_path: str) -> Optional[str]:
         return None
     
     # Configure pytesseract to find Tesseract binary
-    # This is especially important for conda installations
+    # This is especially important for conda installations and cloud platforms (Render)
     try:
         import shutil
         tesseract_cmd = shutil.which('tesseract')
@@ -96,20 +96,21 @@ def extract_text_from_image(file_path: str) -> Optional[str]:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
             logger.debug(f"Configured pytesseract to use: {tesseract_cmd}")
         else:
-            # Fallback: try common conda paths
-            conda_paths = [
-                os.path.join(os.environ.get('CONDA_PREFIX', ''), 'bin', 'tesseract'),
-                '/opt/anaconda3/envs/acctapp/bin/tesseract',
-                '/usr/local/bin/tesseract',
-                '/usr/bin/tesseract',
+            # Fallback: try common paths (including Render's /usr/bin/tesseract)
+            # Order: Render/cloud paths first, then local development paths
+            tesseract_paths = [
+                '/usr/bin/tesseract',  # Render/cloud platforms (installed via apt-get)
+                '/usr/local/bin/tesseract',  # Common system installation
+                os.path.join(os.environ.get('CONDA_PREFIX', ''), 'bin', 'tesseract'),  # Conda
+                '/opt/anaconda3/envs/acctapp/bin/tesseract',  # Specific conda path
             ]
-            for path in conda_paths:
+            for path in tesseract_paths:
                 if path and os.path.exists(path):
                     pytesseract.pytesseract.tesseract_cmd = path
-                    logger.debug(f"Configured pytesseract to use: {path}")
+                    logger.info(f"Configured pytesseract to use: {path}")
                     break
             else:
-                logger.warning("Could not find tesseract binary. OCR may fail.")
+                logger.warning("Could not find tesseract binary. OCR may fail. Trying EasyOCR fallback...")
     except Exception as e:
         logger.warning(f"Error configuring pytesseract path: {e}")
     
