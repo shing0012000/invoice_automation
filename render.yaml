@@ -1,18 +1,42 @@
 services:
   - type: web
     name: invoice-automation
-    env: python
-    buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    env: docker  # Use Docker to install Tesseract OCR
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free  # or starter, standard, etc.
+    region: oregon  # or your preferred region
+    buildCommand: ""  # Docker handles the build
+    startCommand: ""  # Defined in Dockerfile CMD
+    healthCheckPath: /health
     envVars:
+      # Database - Render will provide this automatically if you create a PostgreSQL database
+      # You can also set it manually in Render Dashboard
       - key: DATABASE_URL
-        sync: false  # Set this in Render Dashboard
+        sync: false  # Set this in Render Dashboard or link a PostgreSQL database
+      
+      # Demo Mode - Enable demo mode (hides Swagger, shows only demo endpoints)
       - key: DEMO_MODE
-        value: true
+        value: "true"
+      
+      # Level 3 (Semantic/Gemini) - Set to true if you want to use Gemini
       - key: ENABLE_LEVEL_3_EXTRACTION
-        value: false  # Set to true if you want Gemini
+        value: "false"  # Change to "true" if you want Gemini
+      
       - key: ENABLE_SEMANTIC_EXTRACTION
-        value: false  # Set to true if you want Gemini
+        value: "false"  # Change to "true" if you want Gemini
+      
+      # Google Gemini API Key - Set this in Render Dashboard if using Level 3
       - key: GOOGLE_API_KEY
         sync: false  # Set this in Render Dashboard if using Level 3
-
+      
+      # LLM Fallback settings (optional, defaults are fine)
+      - key: USE_LLM_FALLBACK
+        value: "true"
+      
+      - key: MIN_EXTRACTION_RATE
+        value: "0.5"
+      
+      # Storage directory (default is fine)
+      - key: STORAGE_DIR
+        value: "./storage"

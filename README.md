@@ -93,65 +93,98 @@ If you want to use PostgreSQL locally:
 
 ## Deployment to Render
 
-### Prerequisites
+### Automated Deployment (Recommended)
 
-- Render account (free tier works)
-- GitHub repository with this code
+This project includes `Dockerfile` and `render.yaml` for automated deployment. Render will automatically configure everything!
 
-### Steps
+#### Quick Deploy Steps:
 
-1. **Push to GitHub**
+1. **Check deployment readiness** (optional):
+   ```bash
+   ./check_deploy_ready.sh
+   ```
+
+2. **Push to GitHub**:
    ```bash
    git add .
-   git commit -m "Prepare for Render deployment"
+   git commit -m "Add Dockerfile and render.yaml for automated deployment"
    git push origin main
    ```
 
-2. **Create Render Web Service**
+3. **Create Render Web Service**:
    - Go to [Render Dashboard](https://dashboard.render.com)
    - Click "New +" → "Web Service"
-   - Connect your GitHub repository
-   - Select the `invoice_automation` directory
+   - Connect your GitHub repository: `shing0012000/invoice_automation`
+   - Render will **automatically detect** `render.yaml` and configure everything!
 
-3. **Configure Environment Variables**
+4. **Create PostgreSQL Database** (if needed):
+   - In Render Dashboard, click "New +" → "PostgreSQL"
+   - Name it (e.g., `invoice-automation-db`)
+   - Link it to your web service (Render will auto-set `DATABASE_URL`)
+
+5. **Set Optional Environment Variables** (if using Gemini Level 3):
+   - Go to your Web Service → Environment
+   - Set `GOOGLE_API_KEY`: Your Gemini API key
+   - Set `ENABLE_LEVEL_3_EXTRACTION`: `true`
+   - Set `ENABLE_SEMANTIC_EXTRACTION`: `true`
+
+6. **Deploy**:
+   - Render automatically builds using `Dockerfile`
+   - Tesseract OCR is installed automatically
+   - Service available at `https://your-app.onrender.com`
+
+### What Gets Configured Automatically
+
+The `render.yaml` file automatically sets:
+- ✅ Docker environment (for Tesseract OCR installation)
+- ✅ Health check path: `/health`
+- ✅ Environment variables (demo mode, etc.)
+- ✅ Build and start commands
+
+The `Dockerfile` automatically installs:
+- ✅ Python 3.13
+- ✅ Tesseract OCR (`tesseract-ocr` and `tesseract-ocr-eng`)
+- ✅ All Python dependencies
+- ✅ Application code
+
+### Manual Configuration (If Needed)
+
+If `render.yaml` isn't automatically detected:
+
+1. **Environment Settings**:
+   - **Environment**: Docker
+   - **Dockerfile Path**: `./Dockerfile`
+   - **Docker Context**: `.`
+
+2. **Build & Deploy**:
+   - **Build Command**: (leave empty - Docker handles it)
+   - **Start Command**: (leave empty - defined in Dockerfile)
+   - **Health Check Path**: `/health`
+
+3. **Environment Variables** (set in Render Dashboard):
    ```
-   DATABASE_URL=sqlite:///./invoice_demo.db
+   DATABASE_URL=postgresql+psycopg://... (from PostgreSQL database)
    DEMO_MODE=true
-   PORT=8000
+   ENABLE_LEVEL_3_EXTRACTION=false (or true if using Gemini)
+   ENABLE_SEMANTIC_EXTRACTION=false (or true if using Gemini)
+   GOOGLE_API_KEY=your_key_here (only if using Level 3)
    ```
-   Note: `PORT` is automatically set by Render - you don't need to set it manually.
 
-4. **Configure Health Check** (Important!)
-   - In Render dashboard, go to your service settings
-   - Under "Health Check Path", set: `/health`
-   - This prevents deployment timeouts
+### Verification
 
-5. **Deploy**
-   - Render will automatically detect the `Procfile`
-   - Build and deploy will start automatically
-   - Service will be available at `https://your-app.onrender.com`
+After deployment:
+```bash
+curl https://your-app.onrender.com/health
+```
 
-### Render Configuration
+Should return:
+```json
+{"status":"healthy","service":"invoice-automation","database":"connected","demo_mode":true}
+```
 
-**Important**: To use Tesseract OCR on Render, you must set the build command:
+### Detailed Deployment Guide
 
-- **Build Command**: `chmod +x build.sh && ./build.sh`
-  - This installs Tesseract OCR system package (`tesseract-ocr` and `tesseract-ocr-eng`)
-  - Then installs all Python dependencies from `requirements.txt`
-  - The `build.sh` script handles everything automatically
-  
-- **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Environment**: Python 3
-- **Plan**: Free tier works for demo
-
-**How to Configure**:
-1. In Render Dashboard → Your Service → Settings
-2. Under "Build Command", set: `chmod +x build.sh && ./build.sh`
-3. Save and redeploy
-
-**Alternative**: If you use `render.yaml`, Render will automatically use the build command specified there.
-
-**Note**: Without the build script, Tesseract OCR won't be available and image extraction will fail. The build script is required for Tesseract OCR on Render.
+See [DEPLOY.md](DEPLOY.md) for complete deployment instructions and troubleshooting.
 
 ## Multi-Level Extraction System
 
